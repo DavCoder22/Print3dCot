@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./impr3q
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

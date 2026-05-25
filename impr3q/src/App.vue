@@ -1,198 +1,245 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { auth, checkAuth, logout } from './services/auth'
+import Login from './components/Login.vue'
+import Register from './components/Register.vue'
 
 const proformaRef = ref<HTMLElement>()
 import jsPDF from 'jspdf'
 
-// Validation functions
-const validateEmail = (email: string) => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  return emailRegex.test(email)
+const activeSection = ref<string>('home')
+const authPage = ref<'login' | 'register'>('login')
+
+onMounted(() => { checkAuth() })
+
+function handleLoggedIn() {
+  activeSection.value = 'home'
 }
+
+async function handleLogout() {
+  await logout()
+  activeSection.value = 'home'
+}
+
+const navigateTo = (section: string) => {
+  activeSection.value = section
+}
+
+interface Material {
+  value: string
+  label: string
+  costPerGram: number
+  type: string
+}
+
+const materials: Material[] = [
+  { value: 'pla', label: 'PLA (Filamento)', costPerGram: 0.02, type: 'filament' },
+  { value: 'abs', label: 'ABS (Filamento)', costPerGram: 0.02, type: 'filament' },
+  { value: 'petg', label: 'PETG (Filamento)', costPerGram: 0.02, type: 'filament' },
+  { value: 'tpu', label: 'TPU (Filamento)', costPerGram: 0.025, type: 'filament' },
+  { value: 'standard-resin', label: 'Resina Estándar', costPerGram: 0.05, type: 'resin' },
+  { value: 'tough-resin', label: 'Resina Resistente', costPerGram: 0.06, type: 'resin' },
+  { value: 'flexible-resin', label: 'Resina Flexible', costPerGram: 0.07, type: 'resin' }
+]
+
+const IVA = 1.15
+const HOURLY_RATE = 0.75
+const SHIPPING_COST = 3
+
+interface PrintItem {
+  id: number
+  weight: number
+  material: string
+  quantity: number
+  printingTime: number
+  complexity: number
+  description: string
+  imageUrl: string
+}
+
+interface ProformaItem {
+  id: number
+  description: string
+  material: string
+  weight: number
+  quantity: number
+  printingTime: number
+  complexityFactor: number
+  unitCost: number
+  totalCost: number
+  imageUrl: string
+}
+
+interface Proforma {
+  customerName: string
+  customerEmail: string
+  serviceType: string
+  details: string
+  items: ProformaItem[]
+  subtotal: number
+  shippingCost: number
+  total: number
+  date: string
+}
+
+const formData = ref({
+  name: '',
+  email: '',
+  service: '',
+  shipping: false
+})
+
+const items = ref<PrintItem[]>([
+  createEmptyItem()
+])
+
+const itemCounter = ref(1)
+
+function createEmptyItem(): PrintItem {
+  return {
+    id: 0,
+    weight: 0,
+    material: '',
+    quantity: 1,
+    printingTime: 0,
+    complexity: 1.0,
+    description: '',
+    imageUrl: ''
+  }
+}
+
+function addItem() {
+  itemCounter.value++
+  items.value.push({
+    ...createEmptyItem(),
+    id: itemCounter.value
+  })
+}
+
+function removeItem(index: number) {
+  if (items.value.length > 1) {
+    items.value.splice(index, 1)
+  }
+}
+
+function calculateItemCost(item: PrintItem): { unitCost: number, totalCost: number, weight: number } {
+  const weight = item.weight
+  const material = materials.find(m => m.value === item.material)
+  const materialCost = material ? weight * material.costPerGram * IVA : 0
+  const timeCost = item.printingTime * HOURLY_RATE
+  const unitCost = (materialCost + timeCost) * item.complexity
+  const totalCost = unitCost * item.quantity
+  return { unitCost, totalCost, weight }
+}
+
+const orderSummary = computed(() => {
+  return items.value.map((item, index) => {
+    const { unitCost, totalCost, weight } = calculateItemCost(item)
+    const material = materials.find(m => m.value === item.material)
+    return {
+      index,
+      id: item.id,
+      description: item.description || `Item ${index + 1}`,
+      material: material ? material.label : '',
+      weight,
+      quantity: item.quantity,
+      printingTime: item.printingTime,
+      complexity: item.complexity,
+      unitCost,
+      totalCost,
+      imageUrl: item.imageUrl
+    }
+  })
+})
+
+const subtotal = computed(() => {
+  return orderSummary.value.reduce((sum, item) => sum + item.totalCost, 0)
+})
+
+const shippingCost = computed(() => {
+  return formData.value.shipping ? SHIPPING_COST : 0
+})
+
+const totalOrder = computed(() => {
+  return subtotal.value + shippingCost.value
+})
+
+const proforma = ref<Proforma>({
+  customerName: '',
+  customerEmail: '',
+  serviceType: '',
+  details: '',
+  items: [],
+  subtotal: 0,
+  shippingCost: 0,
+  total: 0,
+  date: ''
+})
 
 const validateForm = () => {
   if (!formData.value.name.trim()) {
     alert('El nombre es requerido.')
     return false
   }
-  if (!validateEmail(formData.value.email)) {
-    alert('Correo electrónico inválido.')
+  if (!formData.value.email.trim()) {
+    alert('El correo electrónico es requerido.')
     return false
   }
   if (!formData.value.service) {
     alert('Selecciona un tipo de servicio.')
     return false
   }
-  if (formData.value.service === '3d-printing' || formData.value.service === 'custom') {
-    if (formData.value.length <= 0 || formData.value.width <= 0 || formData.value.height <= 0) {
-      alert('Las dimensiones deben ser mayores a 0.')
+  for (let i = 0; i < items.value.length; i++) {
+    const item = items.value[i]
+    if (item.weight <= 0) {
+      alert(`Item ${i + 1}: Los gramos deben ser mayores a 0.`)
       return false
     }
-    if (!formData.value.material) {
-      alert('Selecciona un material.')
+    if (!item.material) {
+      alert(`Item ${i + 1}: Selecciona un material.`)
       return false
     }
-    if (formData.value.quantity <= 0) {
-      alert('La cantidad debe ser mayor a 0.')
+    if (item.quantity <= 0) {
+      alert(`Item ${i + 1}: La cantidad debe ser mayor a 0.`)
       return false
     }
-    if (formData.value.printingTime < 0) {
-      alert('El tiempo de impresión no puede ser negativo.')
-      return false
-    }
-  }
-  if (!formData.value.description.trim()) {
-    alert('La descripción es requerida.')
-    return false
-  }
-  if (formData.value.useCustomPrice && formData.value.customPrice < 0) {
-    alert('El precio personalizado no puede ser negativo.')
-    return false
   }
   return true
 }
-
-const activeSection = ref<string>('home')
-
-const navigateTo = (section: string) => {
-  activeSection.value = section
-}
-
-// Form data
-const formData = ref({
-  name: '',
-  email: '',
-  service: '',
-  description: '',
-  length: 0,
-  width: 0,
-  height: 0,
-  material: '',
-  quantity: 1,
-  printingTime: 0,
-  useCustomPrice: false,
-  customPrice: 0
-})
-
-interface Proforma {
-  customerName: string
-  serviceType: string
-  details: string
-  total: number
-  unitPrice: number
-  date: string
-  materialCost: number
-  timeCost: number
-  baseFee: number
-  quantity: number
-  volume: number
-  printingTime: number
-  material: string
-}
-
-// Proforma data
-const proforma = ref<Proforma>({
-  customerName: '',
-  serviceType: '',
-  details: '',
-  total: 0,
-  unitPrice: 0,
-  date: '',
-  materialCost: 0,
-  timeCost: 0,
-  baseFee: 0,
-  quantity: 1,
-  volume: 0,
-  printingTime: 0,
-  material: ''
-})
-
-interface Material {
-  value: string
-  label: string
-  costPerCm3: number
-  type: string
-}
-
-const materials: Material[] = [
-  // Filament (cheaper)
-  { value: 'pla', label: 'PLA (Filamento)', costPerCm3: 0.05, type: 'filament' },
-  { value: 'abs', label: 'ABS (Filamento)', costPerCm3: 0.07, type: 'filament' },
-  { value: 'petg', label: 'PETG (Filamento)', costPerCm3: 0.08, type: 'filament' },
-  { value: 'tpu', label: 'TPU (Filamento)', costPerCm3: 0.09, type: 'filament' },
-  // Resin (more expensive)
-  { value: 'standard-resin', label: 'Resina Estándar', costPerCm3: 0.15, type: 'resin' },
-  { value: 'tough-resin', label: 'Resina Resistente', costPerCm3: 0.18, type: 'resin' },
-  { value: 'flexible-resin', label: 'Resina Flexible', costPerCm3: 0.20, type: 'resin' }
-]
-
-const totalPrice = computed(() => {
-  if (formData.value.useCustomPrice) {
-    return formData.value.customPrice * formData.value.quantity
-  }
-  if (formData.value.service === '3d-printing' || formData.value.service === 'custom') {
-    const volume = formData.value.length * formData.value.width * formData.value.height
-    const material = materials.find(m => m.value === formData.value.material)
-    const materialCost = material ? volume * material.costPerCm3 : 0
-    const timeCost = formData.value.printingTime * 0.25
-    const baseFee = 5
-    return (materialCost + timeCost + baseFee) * formData.value.quantity
-  } else {
-    // For services, fixed price or based on description
-    return 50 * formData.value.quantity // Example fixed price per unit
-  }
-})
-
-const unitPrice = computed(() => {
-  if (formData.value.useCustomPrice) {
-    return formData.value.customPrice
-  }
-  if (formData.value.service === '3d-printing' || formData.value.service === 'custom') {
-    const volume = formData.value.length * formData.value.width * formData.value.height
-    const material = materials.find(m => m.value === formData.value.material)
-    const materialCost = material ? volume * material.costPerCm3 : 0
-    const timeCost = formData.value.printingTime * 0.25
-    const baseFee = 5
-    return materialCost + timeCost + baseFee
-  } else {
-    return 50
-  }
-})
 
 const submitQuote = () => {
   if (!validateForm()) {
     return
   }
-  console.log('Form data submitted:', formData.value)
-  const volume = formData.value.length * formData.value.width * formData.value.height
-  console.log('Calculated volume:', volume)
-  const material = materials.find(m => m.value === formData.value.material)
-  const materialCost = material ? volume * material.costPerCm3 : 0
-  const timeCost = formData.value.printingTime * 0.25
-  const baseFee = 5
-  const total = totalPrice.value
-  console.log('Calculated total:', total)
+  
   proforma.value = {
     customerName: formData.value.name,
+    customerEmail: formData.value.email,
     serviceType: formData.value.service,
-    details: formData.value.description,
-    total: total,
-    unitPrice: unitPrice.value,
-    date: new Date().toLocaleDateString(),
-    materialCost: materialCost * formData.value.quantity,
-    timeCost: timeCost * formData.value.quantity,
-    baseFee: baseFee * formData.value.quantity,
-    quantity: formData.value.quantity,
-    volume: volume,
-    printingTime: formData.value.printingTime,
-    material: material ? material.label : ''
+    details: items.value.map(i => i.description).filter(d => d).join('; '),
+    items: orderSummary.value.map(item => ({
+      id: item.id,
+      description: item.description || `Item ${item.index + 1}`,
+      material: item.material,
+      weight: item.weight,
+      quantity: item.quantity,
+      printingTime: item.printingTime,
+      complexityFactor: item.complexity,
+      unitCost: item.unitCost,
+      totalCost: item.totalCost,
+      imageUrl: item.imageUrl
+    })),
+    subtotal: subtotal.value,
+    shippingCost: shippingCost.value,
+    total: totalOrder.value,
+    date: new Date().toLocaleDateString()
   }
-  console.log('Proforma generated:', proforma.value)
   activeSection.value = 'proforma'
 }
 
 const generatePDF = () => {
   if (!proformaRef.value) return
+  proforma.value.date = new Date().toLocaleDateString()
   const doc = new jsPDF()
   doc.html(proformaRef.value, {
     callback: (doc) => {
@@ -204,48 +251,48 @@ const generatePDF = () => {
     windowWidth: 800
   })
 }
+
+const resetForm = () => {
+  formData.value = { name: '', email: '', service: '', shipping: false }
+  items.value = [createEmptyItem()]
+  activeSection.value = 'quote'
+}
+
+function handleImageUpload(event: Event, index: number) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (file) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      items.value[index].imageUrl = e.target?.result as string
+    }
+    reader.readAsDataURL(file)
+  }
+}
 </script>
 
 <template>
   <div id="app">
-    <!-- Header / Navegación -->
+    <div v-if="auth.loading" class="loading-screen">
+      <div class="spinner"></div>
+      <p>Cargando...</p>
+    </div>
+
+    <Login v-else-if="!auth.user && authPage === 'login'" @register="authPage = 'register'" @loggedIn="handleLoggedIn" />
+    <Register v-else-if="!auth.user && authPage === 'register'" @login="authPage = 'login'" @registered="handleLoggedIn" />
+
+    <template v-else>
+    <!-- Header -->
     <header class="header">
-      <div class="container">
+      <div class="container header-content">
         <div class="logo">
-          <h1>impr<span class="highlight">3</span>q</h1>
+          <h1>IMPR<span class="highlight">3</span>Q</h1>
         </div>
         <nav class="nav">
-          <button 
-            @click="navigateTo('home')" 
-            :class="{ active: activeSection === 'home' }"
-          >
-            Inicio
-          </button>
-          <button 
-            @click="navigateTo('impressions')" 
-            :class="{ active: activeSection === 'impressions' }"
-          >
-            Impresiones 3D
-          </button>
-          <button
-            @click="navigateTo('custom')"
-            :class="{ active: activeSection === 'custom' }"
-          >
-            Keycaps
-          </button>
-          <button 
-            @click="navigateTo('services')" 
-            :class="{ active: activeSection === 'services' }"
-          >
-            Servicios
-          </button>
-          <button 
-            @click="navigateTo('quote')" 
-            :class="{ active: activeSection === 'quote' }"
-            class="cta-button"
-          >
+          <span class="user-greeting" v-if="auth.user">Hola, {{ auth.user.name }}</span>
+          <button @click="navigateTo('quote')" :class="{ active: activeSection === 'quote' }" class="cta-button">
             Cotizar
           </button>
+          <button @click="handleLogout" class="btn-logout">Cerrar Sesión</button>
         </nav>
       </div>
     </header>
@@ -256,20 +303,26 @@ const generatePDF = () => {
         <!-- Sección Home -->
         <section v-if="activeSection === 'home'" class="section">
           <div class="hero">
-            <h2>Bienvenido a impr3q</h2>
-            <p class="subtitle">Tu solución integral en impresión 3D y servicios especializados</p>
-            <div class="hero-cards">
-              <div class="card">
-                <h3>🖨️ Impresiones 3D</h3>
-                <p>Transformamos tus ideas en objetos reales con tecnología de impresión 3D de alta calidad</p>
+            <div class="hero-text">
+              <h2>Impresión 3D<br>de Alta Calidad</h2>
+              <p class="subtitle">Transformamos tus ideas en realidad</p>
+              <button @click="navigateTo('quote')" class="btn-primary">Solicitar Cotización</button>
+            </div>
+            <div class="hero-features">
+              <div class="feature">
+                <span class="feature-icon">🖨️</span>
+                <h3>Impresión 3D</h3>
+                <p>Prototipos, figuras y piezas personalizadas</p>
               </div>
-              <div class="card">
-                <h3>🎨 Objetos Personalizados</h3>
-                <p>Diseños únicos adaptados a tus necesidades específicas</p>
+              <div class="feature">
+                <span class="feature-icon">🎨</span>
+                <h3>Keycaps</h3>
+                <p>Teclados mecánicos personalizados</p>
               </div>
-              <div class="card">
-                <h3>🔧 Servicios Técnicos</h3>
-                <p>Restauración de laptops y piezas de carro con expertos calificados</p>
+              <div class="feature">
+                <span class="feature-icon">🔧</span>
+                <h3>Servicios</h3>
+                <p>Reparación de laptops y autos</p>
               </div>
             </div>
           </div>
@@ -377,50 +430,84 @@ const generatePDF = () => {
               </select>
             </div>
 
-            <!-- Conditional fields for 3D printing and custom -->
-            <template v-if="formData.service === '3d-printing' || formData.service === 'custom'">
-              <div class="form-group">
-                <label for="length">Longitud (cm):</label>
-                <input type="number" id="length" v-model.number="formData.length" placeholder="0" min="0" step="0.1" required>
+            <div v-if="formData.service === '3d-printing' || formData.service === 'custom'" class="items-section">
+              <h3>Items del Pedido</h3>
+              
+              <div v-for="(item, index) in items" :key="item.id" class="item-card">
+                <div class="item-header">
+                  <h4>Item {{ index + 1 }}</h4>
+                  <button type="button" v-if="items.length > 1" @click="removeItem(index)" class="btn-remove">X</button>
+                </div>
+                
+                <div class="item-fields">
+                  <div class="form-group">
+                    <label>Descripción:</label>
+                    <input type="text" v-model="item.description" placeholder="Descripción del item">
+                  </div>
+                  <div class="form-group">
+                      <label>Peso (gramos):</label>
+                      <input type="number" v-model.number="item.weight" min="0" step="0.1" required>
+                    </div>
+                  <div class="form-group">
+                    <label>Material:</label>
+                    <select v-model="item.material" required>
+                      <option value="">Selecciona material</option>
+                      <option v-for="mat in materials" :key="mat.value" :value="mat.value">{{ mat.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Cantidad:</label>
+                    <input type="number" v-model.number="item.quantity" min="1" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Tiempo impresión (horas):</label>
+                    <input type="number" v-model.number="item.printingTime" min="0" step="0.1" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Complejidad:</label>
+                    <select v-model.number="item.complexity">
+                      <option :value="1.25">25% - Simple</option>
+                      <option :value="1.50">50% - Intermedio</option>
+                      <option :value="1.75">75% - Complejo</option>
+                      <option :value="2.00">100% - Muy Complejo</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Imagen de referencia:</label>
+                    <input type="file" accept="image/*" @change="handleImageUpload($event, index)" class="image-input">
+                    <img v-if="item.imageUrl" :src="item.imageUrl" class="image-preview" alt="Vista previa">
+                  </div>
+                </div>
+                
+                <div class="item-cost">
+                  <span>Costo estimado:</span>
+                  <strong>${{ orderSummary[index]?.totalCost.toFixed(2) || '0.00' }}</strong>
+                </div>
               </div>
-              <div class="form-group">
-                <label for="width">Ancho (cm):</label>
-                <input type="number" id="width" v-model.number="formData.width" placeholder="0" min="0" step="0.1" required>
-              </div>
-              <div class="form-group">
-                <label for="height">Altura (cm):</label>
-                <input type="number" id="height" v-model.number="formData.height" placeholder="0" min="0" step="0.1" required>
-              </div>
-              <div class="form-group">
-                <label for="material">Material:</label>
-                <select id="material" v-model="formData.material" required>
-                  <option value="">Selecciona material</option>
-                  <option v-for="mat in materials" :key="mat.value" :value="mat.value">{{ mat.label }}</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="quantity">Cantidad:</label>
-                <input type="number" id="quantity" v-model.number="formData.quantity" placeholder="1" min="1" required>
-              </div>
-              <div class="form-group">
-                <label for="printingTime">Tiempo de impresión (horas):</label>
-                <input type="number" id="printingTime" v-model.number="formData.printingTime" placeholder="0" min="0" step="0.1" required>
-              </div>
-            </template>
 
-            <div class="form-group">
-              <label for="description">Descripción del proyecto:</label>
-              <textarea id="description" v-model="formData.description" rows="5" placeholder="Describe tu proyecto o necesidad..." required></textarea>
+              <button type="button" @click="addItem" class="btn-add-item">+ Agregar Item</button>
             </div>
 
             <div class="form-group">
               <label>
-                <input type="checkbox" v-model="formData.useCustomPrice"> Usar precio personalizado (para clientes preestablecidos)
+                <input type="checkbox" v-model="formData.shipping"> ¿Requiere envío? (+$3)
               </label>
             </div>
-            <div v-if="formData.useCustomPrice" class="form-group">
-              <label for="customPrice">Precio personalizado ($):</label>
-              <input type="number" id="customPrice" v-model.number="formData.customPrice" placeholder="0" min="0" step="0.01" required>
+
+            <div class="order-summary">
+              <h4>Resumen del Pedido</h4>
+              <div class="summary-row">
+                <span>Subtotal:</span>
+                <span>${{ subtotal.toFixed(2) }}</span>
+              </div>
+              <div class="summary-row" v-if="shippingCost > 0">
+                <span>Envío:</span>
+                <span>${{ shippingCost.toFixed(2) }}</span>
+              </div>
+              <div class="summary-row total">
+                <span>Total:</span>
+                <span>${{ totalOrder.toFixed(2) }}</span>
+              </div>
             </div>
 
             <button type="submit" class="submit-button">Generar Proforma</button>
@@ -444,37 +531,55 @@ const generatePDF = () => {
               <p><strong>Email:</strong> info@impr3q.com</p>
             </div>
             <div class="proforma-details">
-              <p><strong>Cliente:</strong> {{ proforma.customerName }}</p>
-              <p><strong>Servicio:</strong> {{ proforma.serviceType }}</p>
-              <p><strong>Descripción:</strong> {{ proforma.details }}</p>
-              <p><strong>Material:</strong> {{ proforma.material }}</p>
-              <p><strong>Cantidad:</strong> {{ proforma.quantity }}</p>
-              <p><strong>Precio Unitario:</strong> ${{ proforma.unitPrice.toFixed(2) }}</p>
-              <p><strong>Volumen:</strong> {{ proforma.volume.toFixed(2) }} cm³</p>
-              <p><strong>Tiempo de Impresión:</strong> {{ proforma.printingTime }} horas</p>
+              <table class="details-table">
+                <tbody>
+                  <tr>
+                    <td><strong>Cliente:</strong></td>
+                    <td>{{ proforma.customerName }}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Email:</strong></td>
+                    <td>{{ proforma.customerEmail }}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Servicio:</strong></td>
+                    <td>{{ proforma.serviceType }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <div class="proforma-breakdown">
-              <h4>Desglose de Costos</h4>
+              <h4>Items del Pedido</h4>
               <table class="cost-table">
                 <thead>
                   <tr>
+                    <th>#</th>
                     <th>Descripción</th>
+                    <th>Material</th>
                     <th>Cantidad</th>
-                    <th>Precio Unitario</th>
                     <th>Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>{{ proforma.material ? proforma.material : 'Servicio' }}</td>
-                    <td>{{ proforma.quantity }}</td>
-                    <td>${{ proforma.unitPrice.toFixed(2) }}</td>
-                    <td>${{ (proforma.unitPrice * proforma.quantity).toFixed(2) }}</td>
+                  <tr v-for="(item, idx) in proforma.items" :key="item.id">
+                    <td>{{ idx + 1 }}</td>
+                    <td>{{ item.description }}</td>
+                    <td>{{ item.material }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>${{ item.totalCost.toFixed(2) }}</td>
                   </tr>
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colspan="3"><strong>Total Estimado:</strong></td>
+                    <td colspan="4"><strong>Subtotal:</strong></td>
+                    <td><strong>${{ proforma.subtotal.toFixed(2) }}</strong></td>
+                  </tr>
+                  <tr v-if="proforma.shippingCost > 0">
+                    <td colspan="4"><strong>Envío:</strong></td>
+                    <td><strong>${{ proforma.shippingCost.toFixed(2) }}</strong></td>
+                  </tr>
+                  <tr>
+                    <td colspan="4"><strong>TOTAL:</strong></td>
                     <td><strong>${{ proforma.total.toFixed(2) }}</strong></td>
                   </tr>
                 </tfoot>
@@ -487,7 +592,17 @@ const generatePDF = () => {
               <p>Contáctanos por WhatsApp: +593 0995100326</p>
               <p style="font-size: 0.9em; color: #666;">Gracias por su preferencia.</p>
               <button @click="generatePDF" class="submit-button">Generar PDF</button>
-              <button @click="navigateTo('quote')" class="submit-button secondary">Nueva Cotización</button>
+              <button @click="resetForm" class="submit-button secondary">Nueva Cotización</button>
+            </div>
+            
+            <div v-if="proforma.items.some(i => i.imageUrl)" class="proforma-images">
+              <h4>Imágenes de Referencia</h4>
+              <div class="images-grid">
+                <div v-for="(item, idx) in proforma.items.filter(i => i.imageUrl)" :key="idx" class="image-item">
+                  <img :src="item.imageUrl" :alt="'Referencia ' + (idx + 1)">
+                  <p>Item {{ proforma.items.findIndex(i => i.imageUrl === item.imageUrl) + 1 }}</p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -501,6 +616,7 @@ const generatePDF = () => {
         <p>Contacto: info@impr3q.com</p>
       </div>
     </footer>
+    </template>
   </div>
 </template>
 
@@ -516,7 +632,7 @@ const generatePDF = () => {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #dc2626 0%, #000000 100%);
 }
 
 .container {
@@ -528,34 +644,43 @@ const generatePDF = () => {
 
 /* Header */
 .header {
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  background: #000;
   padding: 1rem 0;
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
-.header .container {
+.header-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .logo h1 {
-  font-size: 2rem;
-  color: #667eea;
-  font-weight: bold;
+  font-size: 1.8rem;
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: 2px;
 }
 
 .logo .highlight {
-  color: #764ba2;
-  font-size: 2.5rem;
+  color: #dc2626;
 }
 
 .nav {
   display: flex;
   gap: 1rem;
+}
+
+.cta-button {
+  background: #dc2626;
+  color: #fff;
+  padding: 0.6rem 1.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.85rem;
 }
 
 .nav button {
@@ -574,17 +699,17 @@ const generatePDF = () => {
 }
 
 .nav button.active {
-  background: #667eea;
+  background: #dc2626;
   color: white;
 }
 
 .cta-button {
-  background: #764ba2 !important;
-  color: white !important;
+  background: #dc2626;
+  color: #fff;
 }
 
 .cta-button:hover {
-  background: #5a3779 !important;
+  background: #b91c1c;
 }
 
 /* Main Content */
@@ -594,70 +719,108 @@ const generatePDF = () => {
 }
 
 .section {
-  background: white;
-  border-radius: 15px;
-  padding: 3rem;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-  animation: fadeIn 0.5s ease;
+  background: #fff;
+  border-radius: 8px;
+  padding: 2.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  animation: fadeIn 0.4s ease;
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .section h2 {
-  color: #667eea;
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
+  color: #000;
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
 }
 
 .section p {
-  color: #666;
-  font-size: 1.1rem;
-  line-height: 1.6;
+  color: #444;
+  font-size: 1rem;
+  line-height: 1.5;
   margin-bottom: 2rem;
 }
 
 /* Hero Section */
 .hero {
-  text-align: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+  text-align: left;
+}
+
+.hero-text h2 {
+  font-size: 2.5rem;
+  line-height: 1.1;
+  margin-bottom: 0.5rem;
 }
 
 .subtitle {
-  font-size: 1.3rem;
-  color: #764ba2;
-  margin-bottom: 3rem;
+  font-size: 1.2rem;
+  color: #dc2626;
+  margin-bottom: 1.5rem;
 }
 
-.hero-cards {
+.btn-primary {
+  background: #dc2626;
+  color: #fff;
+  padding: 1rem 2rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: #b91c1c;
+}
+
+.hero-features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 2rem;
-  margin-top: 3rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 2rem;
 }
 
-.card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 2rem;
-  border-radius: 10px;
-  color: white;
-  transition: transform 0.3s ease;
+.feature {
+  background: #f5f5f5;
+  padding: 1.5rem;
+  border-radius: 8px;
+  text-align: center;
 }
 
-.card:hover {
-  transform: translateY(-10px);
+.feature-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 0.5rem;
 }
 
-.card h3 {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
+.feature h3 {
+  color: #000;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.feature p {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .hero {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .hero-features {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Service Grid */
@@ -672,7 +835,7 @@ const generatePDF = () => {
   background: #f8f9fa;
   padding: 2rem;
   border-radius: 10px;
-  border-left: 4px solid #667eea;
+  border-left: 4px solid #dc2626;
   transition: all 0.3s ease;
 }
 
@@ -682,7 +845,7 @@ const generatePDF = () => {
 }
 
 .service-item h4 {
-  color: #667eea;
+  color: #dc2626;
   font-size: 1.3rem;
   margin-bottom: 0.5rem;
 }
@@ -693,7 +856,7 @@ const generatePDF = () => {
 }
 
 .image-gallery h3 {
-  color: #667eea;
+  color: #dc2626;
   font-size: 1.5rem;
   margin-bottom: 1rem;
 }
@@ -725,8 +888,178 @@ const generatePDF = () => {
 
 /* Quote Form */
 .quote-form {
-  max-width: 600px;
+  max-width: 700px;
   margin: 0 auto;
+}
+
+.items-section {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+}
+
+.items-section h3 {
+  color: #dc2626;
+  margin-bottom: 1rem;
+  font-size: 1.3rem;
+}
+
+.item-card {
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.item-header h4 {
+  color: #000000;
+  margin: 0;
+}
+
+.btn-remove {
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-remove:hover {
+  background: #c82333;
+}
+
+.item-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.dimensions-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.item-cost {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #ccc;
+  text-align: right;
+  color: #666;
+}
+
+.item-cost strong {
+  color: #dc2626;
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
+
+.btn-add-item {
+  width: 100%;
+  padding: 1rem;
+  background: transparent;
+  border: 2px dashed #dc2626;
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-add-item:hover {
+  background: #dc2626;
+  color: white;
+  border-style: solid;
+}
+
+.order-summary {
+  background: #dc2626;
+  color: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  margin: 1.5rem 0;
+}
+
+.order-summary h4 {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+}
+
+.summary-row.total {
+  border-bottom: none;
+  font-size: 1.3rem;
+  font-weight: bold;
+  padding-top: 1rem;
+}
+
+.image-input {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.image-preview {
+  max-width: 100px;
+  max-height: 100px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+}
+
+.proforma-images {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 2px solid #dc2626;
+}
+
+.proforma-images h4 {
+  color: #dc2626;
+  margin-bottom: 1rem;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.image-item {
+  text-align: center;
+}
+
+.image-item img {
+  max-width: 100%;
+  max-height: 150px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+}
+
+.image-item p {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.25rem;
 }
 
 .form-group {
@@ -755,13 +1088,13 @@ const generatePDF = () => {
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: #dc2626;
 }
 
 .submit-button {
   width: 100%;
   padding: 1rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #dc2626 0%, #000000 100%);
   color: white;
   border: none;
   border-radius: 5px;
@@ -782,7 +1115,7 @@ const generatePDF = () => {
   background: #f8f9fa;
   padding: 2rem;
   border-radius: 10px;
-  border: 2px solid #667eea;
+  border: 2px solid #dc2626;
 }
 
 .proforma-header {
@@ -797,7 +1130,7 @@ const generatePDF = () => {
 }
 
 .proforma-header h3 {
-  color: #667eea;
+  color: #dc2626;
   font-size: 2rem;
 }
 
@@ -812,9 +1145,24 @@ const generatePDF = () => {
   margin: 0.5rem 0;
 }
 
-.proforma-details p {
-  margin-bottom: 1rem;
-  font-size: 1.1rem;
+.proforma-details {
+  text-align: center;
+}
+
+.details-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 auto;
+}
+
+.details-table td {
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.details-table td:first-child {
+  font-weight: bold;
+  width: 40%;
 }
 
 .proforma-breakdown {
@@ -825,7 +1173,7 @@ const generatePDF = () => {
 }
 
 .proforma-breakdown h4 {
-  color: #667eea;
+  color: #dc2626;
   margin-bottom: 1rem;
 }
 
@@ -877,6 +1225,54 @@ const generatePDF = () => {
 }
 
 /* Responsive */
+.loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #dc2626 0%, #000000 100%);
+  color: #fff;
+  gap: 1rem;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.user-greeting {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+}
+
+.btn-logout {
+  background: transparent;
+  border: 1px solid #dc2626;
+  color: #dc2626;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.btn-logout:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
 @media (max-width: 768px) {
   .nav {
     flex-wrap: wrap;
