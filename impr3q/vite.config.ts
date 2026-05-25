@@ -3,6 +3,11 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  base: '/Print3dCot/',
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets'
+  },
   server: {
     proxy: {
       '/api': {

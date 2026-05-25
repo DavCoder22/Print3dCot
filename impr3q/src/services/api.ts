@@ -22,6 +22,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  health() {
+    return request<{ status: string }>('/api/health');
+  },
   login(email: string, password: string) {
     return request<AuthResponse>('/api/auth/login', {
       method: 'POST',

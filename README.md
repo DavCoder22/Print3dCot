@@ -11,6 +11,10 @@ Plataforma web para cotizar servicios de impresión 3D, keycaps personalizados y
 - Subida de imágenes de referencia
 - Despliegue con Docker
 
+🌐 **Demo en GitHub Pages:** https://davcoder22.github.io/Print3dCot/
+
+> El modo demo usa almacenamiento local (localStorage) para la autenticación — no requiere backend.
+
 ## Stack
 
 | Capa       | Tecnología                                |
@@ -54,6 +58,21 @@ npm run certs   # Genera certs autofirmados en certs/
 ```
 
 El backend detecta automáticamente los certificados y sirve HTTPS.
+
+## GitHub Pages
+
+El frontend se despliega automáticamente a GitHub Pages mediante GitHub Actions al hacer push a `main`.
+
+1. Ve a **Settings → Pages** del repositorio
+2. En **Source**, selecciona **GitHub Actions**
+3. El workflow ya está configurado (`.github/workflows/deploy.yml`)
+4. La app detecta si el backend está disponible; si no, activa **modo demo** con autenticación en localStorage
+
+URL: `https://davcoder22.github.io/Print3dCot/`
+
+> ⚠️ El backend (Node.js/Express) **no corre en GitHub Pages**. Para funcionalidad completa:
+> - Despliega el backend en [Render](https://render.com), [Railway](https://railway.app) o similar
+> - Configura `VITE_API_URL` con la URL del backend desplegado
 
 ## Despliegue con Docker
 

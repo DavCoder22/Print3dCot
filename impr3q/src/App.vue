@@ -289,6 +289,7 @@ function handleImageUpload(event: Event, index: number) {
         </div>
         <nav class="nav">
           <span class="user-greeting" v-if="auth.user">Hola, {{ auth.user.name }}</span>
+          <span v-if="auth.demoMode" class="demo-badge">DEMO</span>
           <button @click="navigateTo('quote')" :class="{ active: activeSection === 'quote' }" class="cta-button">
             Cotizar
           </button>
@@ -1271,6 +1272,17 @@ function handleImageUpload(event: Event, index: number) {
 .btn-logout:hover {
   background: #dc2626;
   color: #fff;
+}
+
+.demo-badge {
+  display: inline-block;
+  background: #f59e0b;
+  color: #000;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 1px;
 }
 
 @media (max-width: 768px) {

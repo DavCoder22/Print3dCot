@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { register, auth } from '../services/auth'
 
+
 const emit = defineEmits<{
   (e: 'login'): void
   (e: 'registered'): void
@@ -31,6 +32,7 @@ async function handleRegister() {
       <div class="auth-header">
         <h1>IMPR<span class="highlight">3</span>Q</h1>
         <p>Crea tu cuenta</p>
+        <span v-if="auth.demoMode" class="demo-badge">MODO DEMO</span>
       </div>
 
       <form @submit.prevent="handleRegister" class="auth-form">
@@ -194,5 +196,17 @@ async function handleRegister() {
 
 .link-btn:hover {
   color: #b91c1c;
+}
+
+.demo-badge {
+  display: inline-block;
+  background: #f59e0b;
+  color: #000;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+  letter-spacing: 1px;
 }
 </style>
