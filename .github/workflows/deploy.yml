@@ -30,8 +30,8 @@ jobs:
           VITE_API_URL: ${{ secrets.VITE_API_URL || '' }}
           VITE_DEMO_MODE: ${{ secrets.VITE_API_URL && 'false' || 'true' }}
 
-      - uses: peaceiris/actions-gh-pages@v4
+      - uses: JamesIves/github-pages-deploy-action@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./impr3q/dist
-          cname: false
+          folder: ./impr3q/dist
+          branch: gh-pages
+          clean: true
