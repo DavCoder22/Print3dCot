@@ -66,13 +66,44 @@ El frontend se despliega automáticamente a GitHub Pages mediante GitHub Actions
 1. Ve a **Settings → Pages** del repositorio
 2. En **Source**, selecciona **GitHub Actions**
 3. El workflow ya está configurado (`.github/workflows/deploy.yml`)
-4. La app detecta si el backend está disponible; si no, activa **modo demo** con autenticación en localStorage
 
 URL: `https://davcoder22.github.io/Print3dCot/`
 
-> ⚠️ El backend (Node.js/Express) **no corre en GitHub Pages**. Para funcionalidad completa:
-> - Despliega el backend en [Render](https://render.com), [Railway](https://railway.app) o similar
-> - Configura `VITE_API_URL` con la URL del backend desplegado
+## Despliegue en Render (Backend)
+
+### Opción 1: Usando render.yaml (Blueprint)
+
+El repositorio incluye un `render.yaml` para despliegue automatizado:
+
+1. Ve a https://dashboard.render.com/select-repo
+2. Conecta tu repositorio `DavCoder22/Print3dCot`
+3. Render detectará automáticamente el `render.yaml`
+4. Haz clic en **Apply**
+
+### Opción 2: Manual
+
+1. En Render Dashboard → **New + → Web Service**
+2. Conecta tu repositorio `DavCoder22/Print3dCot`
+3. Configura:
+   - **Name:** `print3dcot-api`
+   - **Runtime:** Node
+   - **Build Command:** `cd backend && npm install`
+   - **Start Command:** `cd backend && npm start`
+   - **Plan:** Free
+4. En **Advanced → Environment Variables**:
+   - `NODE_ENV`: `production`
+   - `JWT_SECRET`: (generar valor seguro)
+   - `CLIENT_ORIGIN`: `https://davcoder22.github.io`
+
+### Conectar Frontend con Backend
+
+Una vez que el backend esté en Render (ej: `https://print3dcot-api.onrender.com`):
+
+1. Ve a **Settings → Secrets and variables → Actions** en tu repo de GitHub
+2. Agrega un **New repository secret**:
+   - **Name:** `VITE_API_URL`
+   - **Value:** `https://print3dcot-api.onrender.com`
+3. El próximo push a `main` rebuildeará el frontend apuntando a tu backend
 
 ## Despliegue con Docker
 
@@ -128,7 +159,8 @@ proyectoPrint3d/
 ## Seguridad
 
 - Contraseñas hasheadas con bcrypt (10 rounds)
-- JWT almacenado en cookie httpOnly, SameSite=Strict
-- CORS configurado con origen específico
-- HTTPS disponible con certs autofirmados
+- JWT en cookie httpOnly + SameSite=None (HTTPS) o Strict (HTTP)
+- Soporte para autenticación vía `Authorization: Bearer` (cross-origin)
+- CORS configurado con orígenes permitidos (localhost, GitHub Pages)
+- HTTPS en producción (Render/GitHub Pages)
 - Tokens expiran a los 7 días

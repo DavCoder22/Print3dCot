@@ -25,9 +25,7 @@ const DEMO_USERS_KEY = 'impr3q_demo_users';
 const DEMO_SESSION_KEY = 'impr3q_demo_session';
 
 function getDemoUsers(): User[] {
-  try {
-    return JSON.parse(localStorage.getItem(DEMO_USERS_KEY) || '[]');
-  } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(DEMO_USERS_KEY) || '[]'); } catch { return []; }
 }
 
 function saveDemoUsers(users: User[]) {
@@ -35,9 +33,7 @@ function saveDemoUsers(users: User[]) {
 }
 
 function getDemoSession(): User | null {
-  try {
-    return JSON.parse(localStorage.getItem(DEMO_SESSION_KEY) || 'null');
-  } catch { return null; }
+  try { return JSON.parse(localStorage.getItem(DEMO_SESSION_KEY) || 'null'); } catch { return null; }
 }
 
 function setDemoSession(user: User) {
@@ -46,6 +42,7 @@ function setDemoSession(user: User) {
 
 function clearDemoSession() {
   localStorage.removeItem(DEMO_SESSION_KEY);
+  localStorage.removeItem('impr3q_token');
 }
 
 export async function checkAuth() {
@@ -64,58 +61,58 @@ export async function checkAuth() {
   }
 }
 
+function storeToken(token?: string) {
+  if (token) localStorage.setItem('impr3q_token', token);
+}
+
 export async function login(email: string, password: string) {
   auth.error = '';
-  if (!auth.demoMode) {
-    try {
-      const res = await api.login(email, password);
-      auth.user = res.user;
+  try {
+    const res = await api.login(email, password);
+    storeToken(res.token);
+    auth.user = res.user;
+    auth.demoMode = false;
+    return true;
+  } catch (err: any) {
+    if (auth.demoMode) {
+      const users = getDemoUsers();
+      const user = users.find(u => u.email === email);
+      if (!user) { auth.error = 'Credenciales inválidas'; return false; }
+      auth.user = user;
+      setDemoSession(user);
       return true;
-    } catch (err: any) {
-      auth.error = err.message;
-      return false;
     }
-  }
-  const users = getDemoUsers();
-  const user = users.find(u => u.email === email);
-  if (!user) {
-    auth.error = 'Credenciales inválidas';
+    auth.error = err.message;
     return false;
   }
-  auth.user = user;
-  setDemoSession(user);
-  return true;
 }
 
 export async function register(name: string, email: string, password: string) {
   auth.error = '';
-  if (!auth.demoMode) {
-    try {
-      const res = await api.register(name, email, password);
-      auth.user = res.user;
+  try {
+    const res = await api.register(name, email, password);
+    storeToken(res.token);
+    auth.user = res.user;
+    auth.demoMode = false;
+    return true;
+  } catch (err: any) {
+    if (auth.demoMode) {
+      const users = getDemoUsers();
+      if (users.find(u => u.email === email)) { auth.error = 'El correo ya está registrado'; return false; }
+      const newUser: User = { id: Date.now().toString(), name, email };
+      users.push(newUser);
+      saveDemoUsers(users);
+      auth.user = newUser;
+      setDemoSession(newUser);
       return true;
-    } catch (err: any) {
-      auth.error = err.message;
-      return false;
     }
-  }
-  const users = getDemoUsers();
-  if (users.find(u => u.email === email)) {
-    auth.error = 'El correo ya está registrado';
+    auth.error = err.message;
     return false;
   }
-  const newUser: User = { id: Date.now().toString(), name, email };
-  users.push(newUser);
-  saveDemoUsers(users);
-  auth.user = newUser;
-  setDemoSession(newUser);
-  return true;
 }
 
 export async function logout() {
-  if (!auth.demoMode) {
-    try { await api.logout(); } catch { }
-  }
+  try { await api.logout(); } catch { }
   clearDemoSession();
   auth.user = null;
 }

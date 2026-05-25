@@ -7,13 +7,21 @@ interface User {
 }
 
 interface AuthResponse {
+  token?: string
   user: User
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...options.headers as Record<string, string> };
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = localStorage.getItem('impr3q_token');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers as Record<string, string> },
+    headers,
     ...options
   });
   const data = await res.json();

@@ -3,7 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
@@ -15,12 +15,22 @@ const JWT_SECRET = process.env.JWT_SECRET || 'impr3q-secret-change-in-production
 const JWT_EXPIRES = process.env.JWT_EXPIRES || '7d';
 const USERS_FILE = join(__dirname, 'users.json');
 const CERT_DIR = join(__dirname, '..', 'certs');
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const isProduction = process.env.NODE_ENV === 'production';
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'https://davcoder22.github.io',
+  process.env.CLIENT_ORIGIN
+].filter(Boolean);
 
 const app = express();
 
 app.use(cors({
-  origin: CLIENT_ORIGIN,
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -53,6 +63,15 @@ function authenticateToken(req, res, next) {
   }
 }
 
+function setTokenCookie(res, token) {
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+}
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -72,16 +91,10 @@ app.post('/api/auth/register', async (req, res) => {
     saveUsers(users);
 
     const token = jwt.sign({ id: newUser.id, name: newUser.name, email: newUser.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    setTokenCookie(res, token);
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    res.status(201).json({ user: { id: newUser.id, name: newUser.name, email: newUser.email } });
-  } catch (err) {
+    res.status(201).json({ token, user: { id: newUser.id, name: newUser.name, email: newUser.email } });
+  } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -99,22 +112,16 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    setTokenCookie(res, token);
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    res.json({ user: { id: user.id, name: user.name, email: user.email } });
-  } catch (err) {
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+  res.clearCookie('token', { httpOnly: true, secure: isProduction, sameSite: isProduction ? 'none' : 'strict' });
   res.json({ message: 'Sesión cerrada' });
 });
 
@@ -122,7 +129,7 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -131,16 +138,11 @@ const keyPath = join(CERT_DIR, 'key.pem');
 const useHttps = existsSync(certPath) && existsSync(keyPath);
 
 if (useHttps) {
-  const httpsOptions = {
-    cert: readFileSync(certPath),
-    key: readFileSync(keyPath)
-  };
-  https.createServer(httpsOptions, app).listen(PORT, () => {
+  https.createServer({ cert: readFileSync(certPath), key: readFileSync(keyPath) }, app).listen(PORT, () => {
     console.log(`HTTPS Server running on https://localhost:${PORT}`);
   });
 } else {
   http.createServer(app).listen(PORT, () => {
     console.log(`HTTP Server running on http://localhost:${PORT}`);
-    console.log('Tip: Generate SSL certs for HTTPS with: npm run certs');
   });
 }
