@@ -129,6 +129,10 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
 
+app.get('/', (_req, res) => {
+  res.json({ app: 'Print3dCot API', status: 'running', docs: '/api/health' });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
