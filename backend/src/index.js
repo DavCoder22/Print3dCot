@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
@@ -15,14 +15,30 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'impr3q-secret-change-in-production';
 const JWT_EXPIRES = process.env.JWT_EXPIRES || '7d';
 const CERT_DIR = join(__dirname, '..', 'certs');
+const USERS_FILE = join(__dirname, 'users.json');
 const isProduction = process.env.NODE_ENV === 'production';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || '';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-if (!supabase) {
-  console.warn('SUPABASE_URL y SUPABASE_SERVICE_KEY no configurados — usando modo degradado (users.json)');
+if (supabase) {
+  console.log('Supabase configurado — usando base de datos PostgreSQL');
+} else {
+  console.warn('SUPABASE_URL y SUPABASE_SERVICE_KEY no configurados — usando users.json como fallback');
+}
+
+function loadUsers() {
+  if (!existsSync(USERS_FILE)) return [];
+  try {
+    return JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveUsers(users) {
+  writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
 const allowedOrigins = [
@@ -96,7 +112,20 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(201).json({ token, user: { id: newUser.id, name: newUser.name, email: newUser.email } });
     }
 
-    return res.status(503).json({ error: 'Base de datos no configurada' });
+    // Fallback users.json (cuando Supabase no está configurado)
+    const users = loadUsers();
+    if (users.find(u => u.email === email)) {
+      return res.status(409).json({ error: 'El correo ya está registrado' });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = { id: Date.now().toString(), name, email, password: hashedPassword, createdAt: new Date().toISOString() };
+    users.push(newUser);
+    saveUsers(users);
+
+    const token = jwt.sign({ id: newUser.id, name: newUser.name, email: newUser.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    setTokenCookie(res, token);
+
+    res.status(201).json({ token, user: { id: newUser.id, name: newUser.name, email: newUser.email } });
   } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -122,7 +151,16 @@ app.post('/api/auth/login', async (req, res) => {
       return res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
     }
 
-    return res.status(503).json({ error: 'Base de datos no configurada' });
+    // Fallback users.json
+    const users = loadUsers();
+    const user = users.find(u => u.email === email);
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    const token = jwt.sign({ id: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    setTokenCookie(res, token);
+
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
   } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
