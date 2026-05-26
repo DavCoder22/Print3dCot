@@ -12,6 +12,7 @@ Plataforma web para cotizar servicios de impresión 3D, keycaps personalizados y
 | Frontend   | Vue 3, TypeScript, Vite, jsPDF                               |
 | Backend    | Node.js, Express, JWT, bcryptjs                              |
 | Auth       | JWT en cookie httpOnly + `Authorization: Bearer` (cross-origin) |
+| Base de datos | Supabase (PostgreSQL)                                       |
 | Infra      | GitHub Pages (frontend), Render (backend), Docker            |
 
 ## Cómo funciona
@@ -59,7 +60,8 @@ Plataforma web para cotizar servicios de impresión 3D, keycaps personalizados y
 ```bash
 cd backend
 npm install
-npm run dev     # http://localhost:3000
+cp .env.example .env   # Configurar SUPABASE_URL y SUPABASE_SERVICE_KEY
+npm run dev            # http://localhost:3000
 ```
 
 ### Frontend
@@ -107,6 +109,8 @@ El repositorio incluye un `render.yaml` para Blueprint, o puedes hacerlo manual:
 | `NODE_ENV` | `production` |
 | `JWT_SECRET` | Generate |
 | `CLIENT_ORIGIN` | `https://davcoder22.github.io` |
+| `SUPABASE_URL` | Tu URL de Supabase |
+| `SUPABASE_SERVICE_KEY` | Tu service_role key de Supabase |
 
 5. Crea el servicio. Render te dará una URL como `https://print3dcot-api.onrender.com`
 
@@ -146,6 +150,8 @@ Print3dCot/
 ├── backend/                 # API REST (Express)
 │   ├── src/index.js
 │   ├── scripts/generate-certs.js
+│   ├── scripts/init-db.sql  # Esquema de Supabase
+│   ├── .env.example
 │   └── Dockerfile
 ├── impr3q/                  # Frontend (Vue 3 + Vite)
 │   ├── src/
@@ -166,6 +172,8 @@ Print3dCot/
 - Soporte `Authorization: Bearer` para cross-origin
 - CORS con orígenes permitidos (localhost, GitHub Pages)
 - Tokens expiran a los 7 días
+- Base de datos: Supabase PostgreSQL (persistente, a diferencia de users.json en Render free)
+- Autenticación via `@supabase/supabase-js` con service_role key (solo backend)
 
 ## CI/CD — Security Hardening
 

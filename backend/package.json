@@ -4,16 +4,11 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-{
-  "name": "print3d-backend",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "certs": "node scripts/generate-certs.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
