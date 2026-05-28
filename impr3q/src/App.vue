@@ -7,6 +7,7 @@ import Register from './components/Register.vue'
 const proformaRef = ref<HTMLElement>()
 import jsPDF from 'jspdf'
 
+const logoUrl = `${import.meta.env.BASE_URL}logos/logo.png`
 const activeSection = ref<string>('home')
 const authPage = ref<'login' | 'register'>('login')
 
@@ -520,7 +521,7 @@ function handleImageUpload(event: Event, index: number) {
           <h2>Proforma Generada</h2>
           <div ref="proformaRef" class="proforma">
             <div class="proforma-header">
-              <img src="/logos/logo.png" alt="Logo" class="logo-img" onerror="this.style.display='none'">
+              <img :src="logoUrl" alt="Logo" class="logo-img">
               <h3>impr3q</h3>
               <p>Nota de Venta / Proforma</p>
               <p><strong>Fecha:</strong> {{ proforma.date }}</p>
